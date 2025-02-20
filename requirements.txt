@@ -1,0 +1,7 @@
+tkinter
+win10toast
+pillow
+pystray
+tkcalendar
+pywin32
+ttkbootstrap 
