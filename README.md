@@ -18,7 +18,6 @@
   ```bash
   python install -r requirements.txt
   python build.py
-
 <p>如果有一些依赖没有安装就自己安装一下再，如果用build.py打包的话去dist目录里面可以找到应用程序</p>
   
 - 使用方法
