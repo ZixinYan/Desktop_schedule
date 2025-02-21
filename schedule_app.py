@@ -220,7 +220,7 @@ class ScheduleApp(ttk.Window):
 
     def create_blur_background(self):
         # 创建磨砂玻璃效果的背景
-        img = Image.new('RGBA', (300, 400), (46, 52, 64, 200)) 
+        img = Image.new('RGBA', (300, 400), (46, 52, 64, 128))  # 修改透明度为128 (50%)
         blur_img = img.filter(ImageFilter.GaussianBlur(radius=10))
         self.blur_bg = ImageTk.PhotoImage(blur_img)
         
@@ -231,7 +231,7 @@ class ScheduleApp(ttk.Window):
         # 创建半透明叠加层
         self.overlay_frame = tk.Frame(self, bg='#2E3440')
         self.overlay_frame.place(relwidth=1, relheight=1)
-
+        self.attributes('-alpha', 0.5)  # 设置整体透明度为50%
 
     def save_last_click(self, event):
         if not self.is_pinned:  # 只在未固定状态下允许拖动
@@ -480,7 +480,27 @@ class ScheduleApp(ttk.Window):
 
     def delete_schedule(self, widget):
         schedule_id = widget.schedule_id
-        self.cursor.execute("DELETE FROM schedules WHERE id=?", (schedule_id,))
+        
+        # 获取日程信息
+        self.cursor.execute("""
+            SELECT repeat_type, parent_id, schedule_time 
+            FROM schedules 
+            WHERE id=?
+        """, (schedule_id,))
+        repeat_type, parent_id, schedule_time = self.cursor.fetchone()
+        
+        if repeat_type != 'none' or parent_id is not None:
+            # 对于重复日程，只删除当天的日程
+            schedule_date = datetime.strptime(schedule_time, '%Y-%m-%d %H:%M:%S').date()
+            self.cursor.execute("""
+                DELETE FROM schedules 
+                WHERE (id=? OR parent_id=?) 
+                AND date(schedule_time)=?
+            """, (schedule_id, schedule_id, schedule_date))
+        else:
+            # 对于非重复日程，直接删除
+            self.cursor.execute("DELETE FROM schedules WHERE id=?", (schedule_id,))
+        
         self.conn.commit()
         self.refresh_schedule_list()
 
@@ -489,17 +509,15 @@ class ScheduleApp(ttk.Window):
         for widget in self.schedule_frame.winfo_children():
             widget.destroy()
         
-        # 获取今天的开始和结束时间
+        # 获取今天的日程
         today = datetime.now().date()
-        today_start = datetime.combine(today, dt_time.min)
-        today_end = datetime.combine(today, dt_time.max)
-        
-        # 获取并显示今日日程
         self.cursor.execute(
-            """SELECT id, content, schedule_time 
-               FROM schedules 
-               WHERE date(schedule_time) = date('now')
-               ORDER BY schedule_time"""
+            """
+            SELECT id, content, schedule_time 
+            FROM schedules 
+            WHERE date(schedule_time) = date('now', 'localtime')
+            ORDER BY schedule_time
+            """
         )
         
         # 日程背景颜色列表（Nord theme colors）
@@ -519,13 +537,13 @@ class ScheduleApp(ttk.Window):
             bg_color, fg_color = schedule_colors[i % len(schedule_colors)]
             
             # 创建日程项框架
-            item_frame = tk.Frame(self.schedule_frame)
+            item_frame = tk.Frame(self.schedule_frame, bg='#2E3440')
             item_frame.schedule_id = schedule_id
             item_frame.pack(fill='x', pady=3, padx=5)
             
-            # 创建内容框架（带圆角效果）
+            # 创建内容框架
             content_frame = tk.Frame(item_frame, bg=bg_color)
-            content_frame.pack(fill='x', ipady=8)  # 增加内边距
+            content_frame.pack(fill='x', ipady=8)
             
             # 时间标签
             time_label = tk.Label(content_frame, text=time_str, 
@@ -542,31 +560,25 @@ class ScheduleApp(ttk.Window):
             # 为每个日程项创建独立的事件处理函数
             def create_handlers(frame, content_frame, bg_color, fg_color):
                 def on_enter(e):
-                    # 加深背景色
-                    r, g, b = tuple(int(bg_color[i:i+2], 16) for i in (1, 3, 5))
-                    darker_bg = f'#{max(0, r-20):02x}{max(0, g-20):02x}{max(0, b-20):02x}'
-                    content_frame.configure(bg=darker_bg)
+                    content_frame.configure(bg='#4C566A')
                     for child in content_frame.winfo_children():
-                        child.configure(bg=darker_bg)
-                    self.attributes('-alpha', 1.0)
+                        child.configure(bg='#4C566A')
                 
                 def on_leave(e):
                     content_frame.configure(bg=bg_color)
                     for child in content_frame.winfo_children():
                         child.configure(bg=bg_color)
-                    self.attributes('-alpha', 0.85)
                 
                 return on_enter, on_leave
             
             # 获取当前日程项的处理函数
             on_enter, on_leave = create_handlers(item_frame, content_frame, bg_color, fg_color)
             
-            # 绑定事件到所有相关部件
+            # 绑定事件
             for widget in [item_frame, content_frame, time_label, content_label]:
                 widget.bind('<Enter>', on_enter)
                 widget.bind('<Leave>', on_leave)
-                if widget != content_frame:  # 不要给内容框架绑定右键事件
-                    widget.bind('<Button-3>', lambda e, w=item_frame: self.delete_schedule(w))
+                widget.bind('<Button-3>', lambda e, w=item_frame: self.delete_schedule(w))
                 widget.schedule_id = schedule_id
 
     def check_notifications(self):
