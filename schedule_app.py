@@ -172,7 +172,7 @@ class ScheduleApp(ttk.Window):
         # 绑定事件
         self.bind('<Button-1>', self.save_last_click)
         self.bind('<B1-Motion>', self.dragging)
-        self.bind('<Double-Button-1>', self.show_add_dialog)
+        self.main_frame.bind('<Double-Button-1>', self.show_add_dialog)
         
         # 添加窗口固定状态标志
         self.is_pinned = False
@@ -245,6 +245,11 @@ class ScheduleApp(ttk.Window):
             self.geometry(f"+{x}+{y}")
 
     def show_add_dialog(self, event=None):
+        # 检查点击位置是否在日程项上
+        clicked_widget = event.widget
+        if isinstance(clicked_widget, tk.Frame) and hasattr(clicked_widget, 'schedule_id'):
+            return  # 如果点击在日程项上，不显示添加对话框
+        
         dialog = ttk.Toplevel(self)  # 使用 ttk.Toplevel
         dialog.title('添加日程')
         dialog.geometry('400x600')
@@ -579,6 +584,7 @@ class ScheduleApp(ttk.Window):
                 widget.bind('<Enter>', on_enter)
                 widget.bind('<Leave>', on_leave)
                 widget.bind('<Button-3>', lambda e, w=item_frame: self.delete_schedule(w))
+                widget.bind('<Double-Button-1>', lambda e, w=item_frame: self.edit_schedule(w))
                 widget.schedule_id = schedule_id
 
     def check_notifications(self):
@@ -776,6 +782,185 @@ class ScheduleApp(ttk.Window):
             # 重新启用拖动
             self.bind('<Button-1>', self.save_last_click)
             self.bind('<B1-Motion>', self.dragging)
+
+    def edit_schedule(self, widget):
+        schedule_id = widget.schedule_id
+        
+        # 获取当前日程信息
+        self.cursor.execute("""
+            SELECT content, schedule_time, repeat_type 
+            FROM schedules 
+            WHERE id=?
+        """, (schedule_id,))
+        content, schedule_time, repeat_type = self.cursor.fetchone()
+        current_schedule = datetime.strptime(schedule_time, '%Y-%m-%d %H:%M:%S')
+        
+        # 创建编辑对话框
+        dialog = ttk.Toplevel(self)
+        dialog.title('修改日程')
+        dialog.geometry('400x600')
+        
+        main_frame = ttk.Frame(dialog)
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # 标题
+        title_frame = ttk.Frame(main_frame)
+        title_frame.pack(fill='x', pady=(0, 20))
+        ttk.Label(
+            title_frame,
+            text="修改日程",
+            font=('微软雅黑', 16, 'bold')
+        ).pack(side='left')
+        
+        # 日期和时间选择区域
+        datetime_frame = ttk.LabelFrame(main_frame, text="时间", padding=15)
+        datetime_frame.pack(fill='x', pady=(0, 20))
+        
+        # 日期选择
+        date_frame = ttk.Frame(datetime_frame)
+        date_frame.pack(fill='x', pady=(0, 10))
+        
+        year_var = tk.StringVar(value=str(current_schedule.year))
+        month_var = tk.StringVar(value=str(current_schedule.month))
+        day_var = tk.StringVar(value=str(current_schedule.day))
+        
+        # 年份选择
+        year = ttk.Spinbox(
+            date_frame,
+            from_=current_schedule.year-5,
+            to=current_schedule.year+5,
+            width=6,
+            textvariable=year_var
+        )
+        year.pack(side='left', padx=5)
+        ttk.Label(date_frame, text="年").pack(side='left')
+        
+        # 月份选择
+        month = ttk.Spinbox(
+            date_frame,
+            from_=1,
+            to=12,
+            width=4,
+            textvariable=month_var
+        )
+        month.pack(side='left', padx=5)
+        ttk.Label(date_frame, text="月").pack(side='left')
+        
+        # 日期选择
+        day = ttk.Spinbox(
+            date_frame,
+            from_=1,
+            to=31,
+            width=4,
+            textvariable=day_var
+        )
+        day.pack(side='left', padx=5)
+        ttk.Label(date_frame, text="日").pack(side='left')
+        
+        # 时间选择
+        time_frame = ttk.Frame(datetime_frame)
+        time_frame.pack(fill='x', pady=(10, 0))
+        
+        hour_var = tk.StringVar(value=str(current_schedule.hour))
+        minute_var = tk.StringVar(value=str(current_schedule.minute))
+        
+        # 小时和分钟选择
+        hour = ttk.Spinbox(
+            time_frame,
+            from_=0,
+            to=23,
+            width=4,
+            textvariable=hour_var
+        )
+        hour.pack(side='left', padx=5)
+        ttk.Label(time_frame, text="时").pack(side='left')
+        
+        minute = ttk.Spinbox(
+            time_frame,
+            from_=0,
+            to=59,
+            width=4,
+            textvariable=minute_var
+        )
+        minute.pack(side='left', padx=5)
+        ttk.Label(time_frame, text="分").pack(side='left')
+        
+        # 内容输入
+        content_frame = ttk.LabelFrame(main_frame, text="内容", padding=15)
+        content_frame.pack(fill='x', pady=(0, 20))
+        
+        content_entry = ttk.Entry(
+            content_frame,
+            font=('微软雅黑', 11)
+        )
+        content_entry.pack(fill='x', padx=5)
+        content_entry.insert(0, content)  # 填入当前内容
+        
+        def validate_content(*args):
+            if len(content_entry.get()) > 10:
+                content_entry.delete(10, tk.END)
+        
+        content_entry.bind('<KeyRelease>', validate_content)
+        
+        # 保存修改
+        def save_changes():
+            try:
+                new_time = datetime(
+                    int(year_var.get()),
+                    int(month_var.get()),
+                    int(day_var.get()),
+                    int(hour_var.get()),
+                    int(minute_var.get())
+                )
+                
+                new_content = content_entry.get().strip()
+                if not new_content:
+                    messagebox.showwarning("警告", "请输入日程内容")
+                    return
+                
+                # 更新数据库
+                self.cursor.execute("""
+                    UPDATE schedules 
+                    SET content=?, schedule_time=? 
+                    WHERE id=?
+                """, (new_content, new_time, schedule_id))
+                
+                self.conn.commit()
+                self.refresh_schedule_list()
+                dialog.destroy()
+                
+            except ValueError as e:
+                messagebox.showerror("错误", "请输入有效的日期和时间")
+        
+        # 按钮区域
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill='x', pady=(0, 10))
+        
+        ttk.Button(
+            button_frame,
+            text="保存",
+            command=save_changes,
+            style='success'
+        ).pack(side='right', padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="取消",
+            command=dialog.destroy,
+            style='secondary'
+        ).pack(side='right', padx=5)
+        
+        # 设置对话框位置
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (dialog.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f'+{x}+{y}')
+        
+        dialog.transient(self)
+        dialog.grab_set()
+        content_entry.focus_set()
 
 def add_to_startup():
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
